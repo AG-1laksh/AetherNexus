@@ -1,5 +1,1 @@
-"""Entity extraction package — NLP-based entity recognition."""
-
-from .extractor import EntityExtractor
-
-__all__ = ["EntityExtractor"]
+from .extractor import extract_entities, merge_entities, ExtractedEntities
