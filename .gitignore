@@ -1,0 +1,32 @@
+# Environment variables (never commit secrets)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads and outputs (runtime data)
+document_pipeline/uploads/*
+!document_pipeline/uploads/.gitkeep
+document_pipeline/output/json/*
+!document_pipeline/output/json/.gitkeep
+document_pipeline/output/chunks/*
+!document_pipeline/output/chunks/.gitkeep
