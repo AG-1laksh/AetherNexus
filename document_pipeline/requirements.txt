@@ -33,3 +33,6 @@ neo4j==6.2.0
 
 # Environment configuration
 python-dotenv==1.2.2
+
+# Vector DB (Local Testing)
+chromadb==0.5.23

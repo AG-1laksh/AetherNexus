@@ -1,5 +1,1 @@
-"""Embedding package — text-to-vector encoding."""
-
-from .embed import Embedder
-
-__all__ = ["Embedder"]
+from .embed import embed_text, embed_batch
