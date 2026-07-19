@@ -13,6 +13,10 @@ from pipeline import run_pipeline_task, JOB_STATUS
 from vector_db.chroma_store import LocalChromaStore
 from embedding.embed import embed_text
 
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
+
 app = FastAPI(
     title="Document Intelligence Pipeline",
     description="Industrial Knowledge Intelligence Platform — document ingestion, OCR, chunking, entity extraction, and vector storage.",
@@ -35,6 +39,7 @@ class ProcessResponse(BaseModel):
 
 class DocumentStatusResponse(BaseModel):
     status: str
+    error: Optional[str] = None
     result: Optional[dict] = None
 
 class SearchResult(BaseModel):
@@ -59,6 +64,7 @@ async def upload_file(file: UploadFile = File(...)):
     ext = Path(file.filename).suffix.lower() if file.filename else ""
     
     if ext not in allowed_extensions:
+        logger.warning(f"Upload rejected: unsupported file type {ext}")
         raise HTTPException(status_code=415, detail=f"Unsupported file type: {ext}")
         
     document_id = str(uuid.uuid4())
@@ -69,7 +75,9 @@ async def upload_file(file: UploadFile = File(...)):
         contents = await file.read()
         with open(file_path, "wb") as f:
             f.write(contents)
+        logger.info(f"File uploaded successfully: {safe_filename}")
     except Exception as e:
+        logger.error(f"Failed to save uploaded file {safe_filename}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
         
     return UploadResponse(
@@ -86,6 +94,7 @@ async def process_document(request: ProcessRequest, background_tasks: Background
     # Locate the file in UPLOAD_DIR
     matched_files = list(UPLOAD_DIR.glob(f"{doc_id}_*"))
     if not matched_files:
+        logger.warning(f"Process request failed: Document ID {doc_id} not found in uploads.")
         raise HTTPException(status_code=404, detail="Document ID not found in uploads.")
         
     filepath = matched_files[0]
@@ -93,6 +102,7 @@ async def process_document(request: ProcessRequest, background_tasks: Background
     
     # Spawn background task
     background_tasks.add_task(run_pipeline_task, doc_id, str(filepath), original_filename)
+    logger.info(f"Enqueued background task for {doc_id}")
     
     return ProcessResponse(
         document_id=doc_id,
@@ -102,7 +112,9 @@ async def process_document(request: ProcessRequest, background_tasks: Background
 @app.get("/document/{id}", response_model=DocumentStatusResponse)
 async def get_document_status(id: str):
     """Checks the status of a document job and returns JSON payload if completed."""
-    status = JOB_STATUS.get(id, "not_found")
+    job_info = JOB_STATUS.get(id, {"status": "not_found"})
+    status = job_info.get("status", "not_found")
+    error = job_info.get("error")
     
     if status == "completed":
         json_path = OUTPUT_JSON_DIR / f"{id}.json"
@@ -111,9 +123,10 @@ async def get_document_status(id: str):
                 data = json.load(f)
             return DocumentStatusResponse(status=status, result=data)
         else:
+            logger.error(f"Job {id} marked completed, but JSON file is missing.")
             return DocumentStatusResponse(status="completed_but_file_missing")
             
-    return DocumentStatusResponse(status=status)
+    return DocumentStatusResponse(status=status, error=error)
 
 @app.get("/search", response_model=SearchResponse)
 async def search_chunks(q: str = Query(..., description="Semantic search query"), top_k: int = Query(5)):

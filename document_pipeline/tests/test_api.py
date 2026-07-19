@@ -6,7 +6,7 @@ from pathlib import Path
 
 # We assume the FastAPI server is running on http://127.0.0.1:8000
 BASE_URL = "http://127.0.0.1:8000"
-TEST_PDF_PATH = Path(__file__).resolve().parent / "sample_files" / "test.pdf"
+TEST_PDF_PATH = Path(__file__).resolve().parent / "sample_files" / "corrupt.pdf"
 
 async def test_api():
     print("=== Testing FastAPI Integration ===\n")
