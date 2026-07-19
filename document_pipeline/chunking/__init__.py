@@ -1,5 +1,1 @@
-"""Chunking package — text splitting strategies."""
-
-from .chunk import TextChunker
-
-__all__ = ["TextChunker"]
+from .chunk import chunk_document, DocumentChunk
