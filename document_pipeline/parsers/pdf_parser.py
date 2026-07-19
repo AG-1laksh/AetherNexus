@@ -2,10 +2,13 @@ import fitz  # PyMuPDF
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any
+import logging
 
 from config import SCANNED_PDF_TEXT_THRESHOLD
 from ocr.paddle_ocr import extract_text as ocr_extract
 from utils.helpers import clean_text
+
+logger = logging.getLogger(__name__)
 
 class PDFParser:
     def __init__(self):
@@ -17,7 +20,11 @@ class PDFParser:
         Detects scanned pages based on text length and routes them to OCR.
         """
         results = []
-        doc = fitz.open(str(file_path))
+        try:
+            doc = fitz.open(str(file_path))
+        except Exception as e:
+            logger.error(f"Failed to open PDF {file_path}. It may be corrupted or password-protected: {e}")
+            raise ValueError(f"Unable to read PDF file (possibly corrupted or encrypted): {e}")
         
         for page_num in range(len(doc)):
             page = doc[page_num]
