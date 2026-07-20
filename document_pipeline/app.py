@@ -9,9 +9,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from config import UPLOAD_DIR, OUTPUT_JSON_DIR
-from pipeline import run_pipeline_task, JOB_STATUS
+from pipeline import JOB_STATUS
 from vector_db.chroma_store import LocalChromaStore
 from embedding.embed import embed_text
+
+import asyncio
+from concurrent.futures import ProcessPoolExecutor
 
 from utils.logger import setup_logger
 
@@ -22,6 +25,34 @@ app = FastAPI(
     description="Industrial Knowledge Intelligence Platform — document ingestion, OCR, chunking, entity extraction, and vector storage.",
     version="0.1.0",
 )
+
+process_pool = None
+
+@app.on_event("startup")
+def startup_event():
+    global process_pool
+    # Limit max_workers to prevent out-of-memory on heavy ML models
+    process_pool = ProcessPoolExecutor(max_workers=2)
+    logger.info("Started ProcessPoolExecutor")
+
+@app.on_event("shutdown")
+def shutdown_event():
+    global process_pool
+    if process_pool:
+        process_pool.shutdown(wait=True)
+        logger.info("Shut down ProcessPoolExecutor")
+
+async def pipeline_wrapper(document_id: str, filepath: str, filename: str):
+    JOB_STATUS[document_id] = {"status": "processing"}
+    loop = asyncio.get_running_loop()
+    try:
+        # Import inside the wrapper to prevent multiprocess fork-bomb imports on Windows
+        from pipeline import run_pipeline_task_subprocess
+        await loop.run_in_executor(process_pool, run_pipeline_task_subprocess, document_id, filepath, filename)
+        JOB_STATUS[document_id] = {"status": "completed"}
+    except Exception as e:
+        logger.error(f"Background process failed for {document_id}: {e}")
+        JOB_STATUS[document_id] = {"status": "failed", "error": str(e)}
 
 # --- Pydantic Models ---
 
@@ -100,9 +131,9 @@ async def process_document(request: ProcessRequest, background_tasks: Background
     filepath = matched_files[0]
     original_filename = filepath.name.replace(f"{doc_id}_", "", 1)
     
-    # Spawn background task
-    background_tasks.add_task(run_pipeline_task, doc_id, str(filepath), original_filename)
-    logger.info(f"Enqueued background task for {doc_id}")
+    # Spawn background task in the ProcessPoolExecutor via the wrapper
+    background_tasks.add_task(pipeline_wrapper, doc_id, str(filepath), original_filename)
+    logger.info(f"Enqueued background process task for {doc_id}")
     
     return ProcessResponse(
         document_id=doc_id,

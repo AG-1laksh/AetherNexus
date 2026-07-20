@@ -35,12 +35,11 @@ def get_document_type(ext: str) -> str:
         return 'excel_spreadsheet'
     return 'unknown_document'
 
-def run_pipeline_task(document_id: str, filepath: str, filename: str):
+def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str):
     """
-    Background task to process a document end-to-end.
-    Updates JOB_STATUS throughout.
+    Background process task to process a document end-to-end.
+    Runs inside a ProcessPoolExecutor to avoid event loop deadlocks.
     """
-    JOB_STATUS[document_id] = {"status": "processing"}
     logger.info(f"Started pipeline for {document_id} ({filename})")
     
     try:
@@ -123,10 +122,10 @@ def run_pipeline_task(document_id: str, filepath: str, filename: str):
             logger.warning(f"Failed to upsert to ChromaDB, but JSON export succeeded: {e}")
             
         # Done!
-        JOB_STATUS[document_id] = {"status": "completed"}
         logger.info(f"Completed pipeline for {document_id}")
+        return True
         
     except Exception as e:
         logger.error(f"Pipeline failed for {document_id}: {e}")
         logger.error(traceback.format_exc())
-        JOB_STATUS[document_id] = {"status": "failed", "error": str(e)}
+        raise e
