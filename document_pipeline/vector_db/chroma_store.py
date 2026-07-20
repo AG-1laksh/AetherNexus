@@ -2,7 +2,11 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any
 
-import chromadb
+try:
+    import chromadb
+except ImportError:
+    chromadb = None
+
 from config import BASE_DIR, VECTOR_INDEX_NAME
 
 logger = logging.getLogger(__name__)
@@ -14,6 +18,8 @@ CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
 class LocalChromaStore:
     def __init__(self):
         try:
+            if chromadb is None:
+                raise ImportError("chromadb is not installed (likely missing C++ build tools)")
             self.client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
             # Use L2 distance by default, or cosine if specified
             self.collection = self.client.get_or_create_collection(

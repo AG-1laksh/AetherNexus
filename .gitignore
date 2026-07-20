@@ -30,3 +30,9 @@ document_pipeline/output/json/*
 !document_pipeline/output/json/.gitkeep
 document_pipeline/output/chunks/*
 !document_pipeline/output/chunks/.gitkeep
+
+# Vector DB
+document_pipeline/vector_db/.chroma/
+
+# Logs
+document_pipeline/output/logs/
