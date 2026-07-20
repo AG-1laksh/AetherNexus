@@ -31,7 +31,7 @@ def get_document_type(ext: str) -> str:
         return 'pdf_document'
     elif ext == 'docx':
         return 'word_document'
-    elif ext == 'xlsx':
+    elif ext in ('xlsx', 'xls'):
         return 'excel_spreadsheet'
     return 'unknown_document'
 
@@ -51,7 +51,7 @@ def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str)
             pages = parse_pdf(filepath)
         elif ext == 'docx':
             pages = parse_docx(filepath)
-        elif ext == 'xlsx':
+        elif ext in ('xlsx', 'xls'):
             pages = parse_excel(filepath)
         elif ext in ('png', 'jpg', 'jpeg'):
             pages = parse_image(filepath)

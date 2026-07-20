@@ -23,6 +23,6 @@ class ImageParser:
             }
         }
 
-def parse_image(file_path: Path) -> Dict[str, Any]:
+def parse_image(file_path: Path) -> list[Dict[str, Any]]:
     parser = ImageParser()
-    return parser.parse(file_path)
+    return [parser.parse(file_path)]

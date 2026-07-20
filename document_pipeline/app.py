@@ -91,7 +91,7 @@ async def health_check() -> dict[str, str]:
 @app.post("/upload", response_model=UploadResponse)
 async def upload_file(file: UploadFile = File(...)):
     """Accepts multipart file upload and saves to disk."""
-    allowed_extensions = {".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg"}
+    allowed_extensions = {".pdf", ".docx", ".xlsx", ".xls", ".png", ".jpg", ".jpeg"}
     ext = Path(file.filename).suffix.lower() if file.filename else ""
     
     if ext not in allowed_extensions:
