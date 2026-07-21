@@ -1,0 +1,6 @@
+# Python 3.14 compatible
+fastapi==0.139.2
+uvicorn==0.51.0
+neo4j==6.2.0
+pydantic==2.12.0
+python-dotenv==1.2.2
