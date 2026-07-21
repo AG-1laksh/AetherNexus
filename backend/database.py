@@ -96,6 +96,128 @@ def ingest_document_to_neo4j(doc_data: dict):
                              chunks=doc_data['chunks'])
         return result.consume().counters.nodes_created
 
+def get_dashboard_stats():
+    """
+    Aggregates counts and failure/maintenance breakdowns from the graph
+    for the Dashboard page.
+    """
+    if driver is None:
+        print("Error: Neo4j driver is not initialized.")
+        return None
+
+    with driver.session() as session:
+        totals = session.run(
+            """
+            OPTIONAL MATCH (d:Document)
+            WITH count(DISTINCT d) AS documents
+            OPTIONAL MATCH (e:Entity {label: 'equipment'})
+            WITH documents, count(DISTINCT e) AS equipment
+            OPTIONAL MATCH (c:TextChunk)-[:MENTIONS]->(:Entity {label: 'fault'})
+            RETURN documents, equipment, count(DISTINCT c) AS maintenance_reports
+            """
+        ).single()
+
+        failures = session.run(
+            """
+            MATCH (eq:Entity {label: 'equipment'})<-[:MENTIONS]-(c:TextChunk)-[:MENTIONS]->(:Entity {label: 'fault'})
+            RETURN eq.name AS name, count(DISTINCT c) AS failures
+            ORDER BY failures DESC
+            LIMIT 5
+            """
+        )
+        equipment_failures = [record.data() for record in failures]
+
+        uploads = session.run(
+            """
+            MATCH (d:Document)
+            RETURN substring(d.timestamp, 0, 7) AS month, count(d) AS count
+            ORDER BY month
+            """
+        )
+        documents_uploaded = [record.data() for record in uploads if record["month"]]
+
+        return {
+            "totals": {
+                "documents": totals["documents"] or 0,
+                "equipment": totals["equipment"] or 0,
+                "maintenance_reports": totals["maintenance_reports"] or 0,
+            },
+            "equipment_failures": equipment_failures,
+            "documents_uploaded": documents_uploaded,
+        }
+
+
+def get_equipment_by_id(equipment_id: str):
+    """
+    Looks up a single equipment Entity node (case-insensitive name match)
+    and derives maintenance/failure counts and dates from linked chunks.
+    """
+    if driver is None:
+        print("Error: Neo4j driver is not initialized.")
+        return None
+
+    with driver.session() as session:
+        record = session.run(
+            """
+            MATCH (eq:Entity {label: 'equipment'})
+            WHERE toLower(eq.name) CONTAINS toLower($equipment_id)
+            OPTIONAL MATCH (eq)<-[:MENTIONS]-(c:TextChunk)-[:PART_OF]->(d:Document)
+            OPTIONAL MATCH (c)-[:MENTIONS]->(fault:Entity {label: 'fault'})
+            OPTIONAL MATCH (c)-[:MENTIONS]->(loc:Entity {label: 'location'})
+            RETURN eq.name AS name,
+                   collect(DISTINCT loc.name)[0] AS location,
+                   count(DISTINCT c) AS maintenance_count,
+                   count(DISTINCT fault) AS failure_count,
+                   max(d.timestamp) AS last_maintenance
+            """,
+            equipment_id=equipment_id,
+        ).single()
+
+        if record is None or record["name"] is None:
+            return None
+
+        return record.data()
+
+
+def get_knowledge_graph(limit: int = 50):
+    """
+    Returns a bounded set of Document/TextChunk/Entity nodes and their
+    relationships for the React Flow visualization.
+    """
+    if driver is None:
+        print("Error: Neo4j driver is not initialized.")
+        return {"nodes": [], "edges": []}
+
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (d:Document)<-[:PART_OF]-(c:TextChunk)-[:MENTIONS]->(e:Entity)
+            RETURN d, c, e
+            LIMIT $limit
+            """,
+            limit=limit,
+        )
+
+        nodes = {}
+        edges = []
+
+        for record in result:
+            d, c, e = record["d"], record["c"], record["e"]
+
+            doc_id = f"document-{d['document_id']}"
+            chunk_id = f"chunk-{c['chunk_id']}"
+            entity_id = f"entity-{e['name']}"
+
+            nodes.setdefault(doc_id, {"id": doc_id, "data": {"label": d["filename"], "type": "document"}})
+            nodes.setdefault(chunk_id, {"id": chunk_id, "data": {"label": c["chunk_id"], "type": "chunk"}})
+            nodes.setdefault(entity_id, {"id": entity_id, "data": {"label": e["name"], "type": "equipment" if e.get("label") == "equipment" else "entity"}})
+
+            edges.append({"id": f"{chunk_id}-part_of-{doc_id}", "source": chunk_id, "target": doc_id, "label": "part_of"})
+            edges.append({"id": f"{chunk_id}-mentions-{entity_id}", "source": chunk_id, "target": entity_id, "label": "mentions"})
+
+        return {"nodes": list(nodes.values()), "edges": edges}
+
+
 def search_graph_by_embedding(embedding: list, top_k: int = 3):
     """
     Searches the graph for similar text chunks and traverses to get context.
