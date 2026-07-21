@@ -1,6 +1,9 @@
 # Environment variables (never commit secrets)
 .env
 
+# Node / frontend
+node_modules/
+
 # Python
 __pycache__/
 *.py[cod]
