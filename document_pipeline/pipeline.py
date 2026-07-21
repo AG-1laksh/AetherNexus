@@ -17,11 +17,9 @@ from utils.json_export import ExportedDocument, ExportedChunk, export_to_json
 from vector_db.chroma_store import LocalChromaStore
 
 from utils.logger import setup_logger
+from utils.status import update_status
 
 logger = setup_logger(__name__)
-
-# Global in-memory job tracker for the MVP
-JOB_STATUS: Dict[str, Dict[str, Any]] = {}
 
 def get_document_type(ext: str) -> str:
     """Map file extensions to document_type labels."""
@@ -43,6 +41,7 @@ def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str)
     logger.info(f"Started pipeline for {document_id} ({filename})")
     
     try:
+        update_status(document_id, "processing", current_stage="parsing")
         ext = get_file_extension(filename)
         document_type = get_document_type(ext)
         
@@ -64,18 +63,26 @@ def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str)
                 page["text"] = clean_text(page["text"])
                 
         # 2. Chunking
+        update_status(document_id, "processing", current_stage="chunking")
         chunks = chunk_document(pages, filename=filename, document_type=document_type)
         logger.info(f"Generated {len(chunks)} chunks for {document_id}")
         
         if not chunks:
              logger.warning(f"No text extracted for {document_id}")
-             # We can still output an empty document
              
         # 3. Entities & 4. Embeddings
+        update_status(document_id, "processing", current_stage="entity_extraction")
         exported_chunks = []
         chunk_entities_list = []
         
-        for c in chunks:
+        # In a real heavy pipeline, this loop might be slow, so we could update status inside it, 
+        # but updating per chunk is too much I/O. We'll update for embedding stage specifically.
+        
+        for idx, c in enumerate(chunks):
+            # Update stage halfway through just to show progress if it's very long
+            if idx == 0:
+                update_status(document_id, "processing", current_stage="entity_extraction_and_embedding")
+                
             ents = extract_entities(c.text)
             chunk_entities_list.append(ents)
             
@@ -96,6 +103,7 @@ def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str)
         doc_entities = merge_entities(chunk_entities_list)
         
         # 5. JSON Export
+        update_status(document_id, "processing", current_stage="exporting")
         export_doc = ExportedDocument(
             document_id=document_id,
             filename=filename,
@@ -123,9 +131,11 @@ def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str)
             
         # Done!
         logger.info(f"Completed pipeline for {document_id}")
+        update_status(document_id, "completed", current_stage="done")
         return True
         
     except Exception as e:
         logger.error(f"Pipeline failed for {document_id}: {e}")
         logger.error(traceback.format_exc())
+        update_status(document_id, "failed", error=str(e))
         raise e

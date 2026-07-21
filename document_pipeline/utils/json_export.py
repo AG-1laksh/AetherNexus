@@ -28,6 +28,25 @@ class ExportedDocument(BaseModel):
     entities: ExtractedEntities
     chunks: List[ExportedChunk]
 
+from pydantic import Field
+
+class ExportedChunkAPI(BaseModel):
+    chunk_id: str
+    page_number: int
+    text: str
+    char_count: int
+    embedding: List[float] = Field(default_factory=list, exclude=True)
+    entities: ExtractedEntities
+
+class ExportedDocumentAPI(BaseModel):
+    document_id: str
+    filename: str
+    document_type: str
+    processed_at: str
+    page_count: int
+    entities: ExtractedEntities
+    chunks: List[ExportedChunkAPI]
+
 def export_to_json(doc: ExportedDocument) -> Path:
     """
     Validates the ExportedDocument and writes it to disk as a JSON file.

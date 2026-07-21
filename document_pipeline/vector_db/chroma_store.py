@@ -4,8 +4,10 @@ from typing import List, Dict, Any
 
 try:
     import chromadb
+    CHROMA_AVAILABLE = True
 except ImportError:
     chromadb = None
+    CHROMA_AVAILABLE = False
 
 from config import BASE_DIR, VECTOR_INDEX_NAME
 
@@ -17,9 +19,10 @@ CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 class LocalChromaStore:
     def __init__(self):
+        if not CHROMA_AVAILABLE:
+            raise RuntimeError("Local vector search unavailable — chromadb not installed")
+            
         try:
-            if chromadb is None:
-                raise ImportError("chromadb is not installed (likely missing C++ build tools)")
             self.client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
             # Use L2 distance by default, or cosine if specified
             self.collection = self.client.get_or_create_collection(
@@ -28,10 +31,13 @@ class LocalChromaStore:
             )
             logger.info("Initialized local ChromaDB successfully.")
         except Exception as e:
-            logger.warning(f"Failed to initialize ChromaDB (This is optional for testing): {e}")
+            logger.warning(f"Failed to initialize ChromaDB: {e}")
             self.collection = None
 
     def upsert_chunks(self, chunk_ids: List[str], embeddings: List[List[float]], texts: List[str], metadatas: List[Dict[str, Any]]):
+        if not CHROMA_AVAILABLE:
+            raise RuntimeError("Local vector search unavailable — chromadb not installed")
+            
         if not self.collection:
             return
             
@@ -46,6 +52,9 @@ class LocalChromaStore:
             logger.error(f"Failed to upsert to Chroma: {e}")
 
     def query_similar(self, query_embedding: List[float], top_k: int = 3) -> Dict[str, Any]:
+        if not CHROMA_AVAILABLE:
+            raise RuntimeError("Local vector search unavailable — chromadb not installed")
+            
         if not self.collection:
             return {}
             

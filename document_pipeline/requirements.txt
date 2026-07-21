@@ -35,5 +35,7 @@ neo4j==6.2.0
 # Environment configuration
 python-dotenv==1.2.2
 
-# Vector DB (Local Testing)
-chromadb==0.5.23
+# Vector DB (Local Testing - Optional)
+# Note: chromadb requires Microsoft C++ Build Tools on Windows. 
+# Uncomment the line below to install if you have the build tools.
+# chromadb==0.5.23

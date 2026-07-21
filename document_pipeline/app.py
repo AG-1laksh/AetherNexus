@@ -1,7 +1,11 @@
 import os
+
+# Silence Intel MKL/OpenMP duplicate library runtime conflicts on Windows
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import uuid
 import json
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
@@ -9,9 +13,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from config import UPLOAD_DIR, OUTPUT_JSON_DIR
-from pipeline import JOB_STATUS
 from vector_db.chroma_store import LocalChromaStore
 from embedding.embed import embed_text
+from utils.json_export import ExportedDocument, ExportedDocumentAPI
+from utils.status import get_status, update_status
 
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -43,16 +48,17 @@ def shutdown_event():
         logger.info("Shut down ProcessPoolExecutor")
 
 async def pipeline_wrapper(document_id: str, filepath: str, filename: str):
-    JOB_STATUS[document_id] = {"status": "processing"}
+    # Initial status is written here so the API immediately knows it's queued
+    update_status(document_id, "processing", current_stage="queued")
     loop = asyncio.get_running_loop()
     try:
         # Import inside the wrapper to prevent multiprocess fork-bomb imports on Windows
         from pipeline import run_pipeline_task_subprocess
         await loop.run_in_executor(process_pool, run_pipeline_task_subprocess, document_id, filepath, filename)
-        JOB_STATUS[document_id] = {"status": "completed"}
+        # Success status is handled by the worker process
     except Exception as e:
         logger.error(f"Background process failed for {document_id}: {e}")
-        JOB_STATUS[document_id] = {"status": "failed", "error": str(e)}
+        update_status(document_id, "failed", error=str(e))
 
 # --- Pydantic Models ---
 
@@ -68,10 +74,17 @@ class ProcessResponse(BaseModel):
     document_id: str
     status: str
 
-class DocumentStatusResponse(BaseModel):
+class DocumentStatusResponseSlim(BaseModel):
     status: str
+    current_stage: Optional[str] = None
     error: Optional[str] = None
-    result: Optional[dict] = None
+    result: Optional[ExportedDocumentAPI] = None
+
+class DocumentStatusResponseFull(BaseModel):
+    status: str
+    current_stage: Optional[str] = None
+    error: Optional[str] = None
+    result: Optional[ExportedDocument] = None
 
 class SearchResult(BaseModel):
     text: str
@@ -140,24 +153,30 @@ async def process_document(request: ProcessRequest, background_tasks: Background
         status="processing"
     )
 
-@app.get("/document/{id}", response_model=DocumentStatusResponse)
-async def get_document_status(id: str):
+@app.get("/document/{id}", response_model=Union[DocumentStatusResponseFull, DocumentStatusResponseSlim])
+async def get_document_status(id: str, include_embeddings: bool = False):
     """Checks the status of a document job and returns JSON payload if completed."""
-    job_info = JOB_STATUS.get(id, {"status": "not_found"})
-    status = job_info.get("status", "not_found")
-    error = job_info.get("error")
     
+    status_info = get_status(id)
+    if status_info is None:
+        raise HTTPException(status_code=404, detail="Document job not found.")
+        
+    status = status_info.get("status", "processing")
+    current_stage = status_info.get("current_stage")
+    error = status_info.get("error")
+
     if status == "completed":
         json_path = OUTPUT_JSON_DIR / f"{id}.json"
         if json_path.exists():
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return DocumentStatusResponse(status=status, result=data)
-        else:
-            logger.error(f"Job {id} marked completed, but JSON file is missing.")
-            return DocumentStatusResponse(status="completed_but_file_missing")
             
-    return DocumentStatusResponse(status=status, error=error)
+            if include_embeddings:
+                return DocumentStatusResponseFull(status="completed", current_stage=current_stage, result=data)
+            else:
+                return DocumentStatusResponseSlim(status="completed", current_stage=current_stage, result=data)
+
+    return DocumentStatusResponseSlim(status=status, current_stage=current_stage, error=error)
 
 @app.get("/search", response_model=SearchResponse)
 async def search_chunks(q: str = Query(..., description="Semantic search query"), top_k: int = Query(5)):
@@ -185,5 +204,9 @@ async def search_chunks(q: str = Query(..., description="Semantic search query")
                 
         return SearchResponse(results=search_results)
         
+    except RuntimeError as re:
+        if "chromadb not installed" in str(re):
+            raise HTTPException(status_code=503, detail=str(re))
+        raise HTTPException(status_code=503, detail=f"Search failed: {re}")
     except Exception as e:
          raise HTTPException(status_code=503, detail=f"Search failed: {e}")
