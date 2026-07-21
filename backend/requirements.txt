@@ -1,6 +1,36 @@
-# Python 3.14 compatible
+# Document Intelligence Pipeline - Pinned Dependencies
+# Python 3.12 compatible
+
+# Web framework
 fastapi==0.139.2
 uvicorn==0.51.0
-neo4j==6.2.0
+python-multipart==0.0.32
+
+# Data validation
 pydantic==2.12.0
+
+# PDF parsing
+pymupdf==1.28.0
+
+# DOCX parsing
+python-docx==1.2.0
+
+# Excel parsing
+pandas==3.0.3
+openpyxl==3.1.5
+xlrd==2.0.1
+
+# OCR engines
+paddleocr==3.2.0
+paddlepaddle==3.1.1
+pytesseract==0.3.13
+
+# NLP & Embeddings
+sentence-transformers==5.6.0
+spacy==3.8.4
+
+# Graph database (Neo4j AuraDB driver)
+neo4j==6.2.0
+
+# Environment configuration
 python-dotenv==1.2.2
