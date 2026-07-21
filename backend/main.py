@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import database
-from routes import ingest, query
+from routes import ingest, query, dashboard, equipment, graph
 
 from contextlib import asynccontextmanager
 
@@ -32,6 +32,9 @@ app.add_middleware(
 # Include routers
 app.include_router(ingest.router, prefix="/api/ingest", tags=["Ingestion"])
 app.include_router(query.router, prefix="/api/query", tags=["Query"])
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(equipment.router, prefix="/api/equipment", tags=["Equipment"])
+app.include_router(graph.router, prefix="/api/graph", tags=["Knowledge Graph"])
 
 @app.get("/")
 def read_root():
