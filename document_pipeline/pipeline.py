@@ -1,5 +1,6 @@
 import logging
 import traceback
+import concurrent.futures
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any
@@ -11,10 +12,10 @@ from parsers.excel_parser import parse_excel
 from parsers.image_parser import parse_image
 from utils.helpers import clean_text, get_file_extension
 from chunking.chunk import chunk_document
-from entity.extractor import extract_entities, merge_entities
-from embedding.embed import embed_text
+from entity.extractor import extract_entities, extract_entities_batch, merge_entities
+from embedding.embed import embed_text, embed_batch
 from utils.json_export import ExportedDocument, ExportedChunk, export_to_json
-from vector_db.chroma_store import LocalChromaStore
+from vector_db.neo4j_store import Neo4jVectorStore
 
 from utils.logger import setup_logger
 from utils.status import update_status
@@ -71,23 +72,20 @@ def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str)
              logger.warning(f"No text extracted for {document_id}")
              
         # 3. Entities & 4. Embeddings
-        update_status(document_id, "processing", current_stage="entity_extraction")
+        update_status(document_id, "processing", current_stage="entity_extraction_and_embedding")
         exported_chunks = []
         chunk_entities_list = []
         
-        # In a real heavy pipeline, this loop might be slow, so we could update status inside it, 
-        # but updating per chunk is too much I/O. We'll update for embedding stage specifically.
+        texts = [c.text for c in chunks]
         
-        for idx, c in enumerate(chunks):
-            # Update stage halfway through just to show progress if it's very long
-            if idx == 0:
-                update_status(document_id, "processing", current_stage="entity_extraction_and_embedding")
-                
-            ents = extract_entities(c.text)
+        logger.info("Generating vector embeddings...")
+        embeddings = embed_batch(texts)
+        
+        logger.info("Extracting graph entities via NLP & Regex...")
+        all_entities = extract_entities_batch(texts)
+            
+        for c, ents, emb in zip(chunks, all_entities, embeddings):
             chunk_entities_list.append(ents)
-            
-            emb = embed_text(c.text)
-            
             exported_chunks.append(ExportedChunk(
                 chunk_id=c.chunk_id,
                 page_number=c.page_number,
@@ -116,18 +114,14 @@ def run_pipeline_task_subprocess(document_id: str, filepath: str, filename: str)
         
         export_to_json(export_doc)
         
-        # 6. Local Vector Upsert (Optional Sanity DB)
+        # 6. Store in Neo4j AuraDB
         try:
-            store = LocalChromaStore()
-            if store.collection and exported_chunks:
-                ids = [c.chunk_id for c in exported_chunks]
-                embeddings = [c.embedding for c in exported_chunks]
-                texts = [c.text for c in exported_chunks]
-                metadatas = [{"filename": filename, "document_id": document_id, "page_number": c.page_number} for c in exported_chunks]
-                store.upsert_chunks(ids, embeddings, texts, metadatas)
-                logger.info(f"Upserted {len(exported_chunks)} chunks to ChromaDB for {document_id}")
+            store = Neo4jVectorStore()
+            doc_dict = export_doc.model_dump(mode="json", exclude_none=False)
+            store.store_document(doc_dict)
+            store.close()
         except Exception as e:
-            logger.warning(f"Failed to upsert to ChromaDB, but JSON export succeeded: {e}")
+            logger.warning(f"Failed to store in Neo4j, but JSON export succeeded: {e}")
             
         # Done!
         logger.info(f"Completed pipeline for {document_id}")

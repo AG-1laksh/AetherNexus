@@ -10,11 +10,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from config import UPLOAD_DIR, OUTPUT_JSON_DIR
-from vector_db.chroma_store import LocalChromaStore
-from embedding.embed import embed_text
 from utils.json_export import ExportedDocument, ExportedDocumentAPI
 from utils.status import get_status, update_status
 
@@ -29,6 +28,15 @@ app = FastAPI(
     title="Document Intelligence Pipeline",
     description="Industrial Knowledge Intelligence Platform — document ingestion, OCR, chunking, entity extraction, and vector storage.",
     version="0.1.0",
+)
+
+# Enable CORS for frontend requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 process_pool = None
@@ -86,13 +94,7 @@ class DocumentStatusResponseFull(BaseModel):
     error: Optional[str] = None
     result: Optional[ExportedDocument] = None
 
-class SearchResult(BaseModel):
-    text: str
-    metadata: dict
-    score: float
 
-class SearchResponse(BaseModel):
-    results: List[SearchResult]
 
 # --- Endpoints ---
 
@@ -177,36 +179,3 @@ async def get_document_status(id: str, include_embeddings: bool = False):
                 return DocumentStatusResponseSlim(status="completed", current_stage=current_stage, result=data)
 
     return DocumentStatusResponseSlim(status=status, current_stage=current_stage, error=error)
-
-@app.get("/search", response_model=SearchResponse)
-async def search_chunks(q: str = Query(..., description="Semantic search query"), top_k: int = Query(5)):
-    """(Optional) Query local ChromaDB vector store."""
-    try:
-        store = LocalChromaStore()
-        if not store.collection:
-            raise HTTPException(status_code=503, detail="ChromaDB is not initialized.")
-            
-        query_embed = embed_text(q)
-        results = store.query_similar(query_embed, top_k=top_k)
-        
-        search_results = []
-        if results and results.get("documents") and results.get("distances"):
-            docs = results["documents"][0]
-            metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
-            dists = results["distances"][0]
-            
-            for d, m, dist in zip(docs, metas, dists):
-                search_results.append(SearchResult(
-                    text=d,
-                    metadata=m,
-                    score=1.0 - dist # approximate cosine similarity from L2/Cosine dist
-                ))
-                
-        return SearchResponse(results=search_results)
-        
-    except RuntimeError as re:
-        if "chromadb not installed" in str(re):
-            raise HTTPException(status_code=503, detail=str(re))
-        raise HTTPException(status_code=503, detail=f"Search failed: {re}")
-    except Exception as e:
-         raise HTTPException(status_code=503, detail=f"Search failed: {e}")

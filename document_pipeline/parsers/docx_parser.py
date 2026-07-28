@@ -34,6 +34,17 @@ class DOCXParser:
                 text = f"{prefix}{text}"
             
             extracted_paragraphs.append(text)
+
+        # Also extract structured content from Word tables
+        for table_idx, table in enumerate(doc.tables):
+            table_rows = []
+            for row in table.rows:
+                row_cells = [clean_text(cell.text.strip()) for cell in row.cells]
+                table_rows.append(" | ".join(row_cells))
+            if table_rows:
+                header_sep = " | ".join(["---"] * len(table_rows[0].split(" | ")))
+                md_table = f"\n### Table {table_idx+1}\n" + table_rows[0] + "\n" + header_sep + "\n" + "\n".join(table_rows[1:]) + "\n"
+                extracted_paragraphs.append(md_table)
             
         full_text = "\n\n".join(extracted_paragraphs)
         

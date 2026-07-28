@@ -2,27 +2,41 @@ import os
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 
-load_dotenv()
+from pathlib import Path
+
+env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 
-try:
-    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
-    # verify connectivity on startup so we fail early if DB is offline
-    driver.verify_connectivity()
-except Exception as e:
-    print(f"Warning: Could not connect to Neo4j database at {NEO4J_URI}.")
-    print(f"Error: {e}")
-    driver = None
+driver = None
+
+def get_driver():
+    global driver
+    if driver is None:
+        try:
+            env_path = Path(__file__).resolve().parent / ".env"
+            load_dotenv(dotenv_path=env_path)
+            uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+            user = os.getenv("NEO4J_USERNAME", "neo4j")
+            pw = os.getenv("NEO4J_PASSWORD", "password")
+            driver = GraphDatabase.driver(uri, auth=(user, pw))
+            driver.verify_connectivity()
+            print(f"Successfully connected to Neo4j database at {uri}")
+        except Exception as e:
+            print(f"Warning: Could not connect to Neo4j database at {uri}. Error: {e}")
+            driver = None
+    return driver
 
 def init_db():
     """Initialize database constraints and vector indexes."""
-    if driver is None:
+    drv = get_driver()
+    if drv is None:
         print("Database not initialized, driver is None.")
         return
-    with driver.session() as session:
+    with drv.session() as session:
         # Create constraint for unique Document filenames
         session.run("CREATE CONSTRAINT doc_filename IF NOT EXISTS FOR (d:Document) REQUIRE d.filename IS UNIQUE")
         # Create constraint for unique TextChunks
@@ -55,9 +69,9 @@ def ingest_document_to_neo4j(doc_data: dict):
         chunk['flat_entities'] = flat_entities
 
     query = """
-    // 1. Create the Document Node
-    MERGE (d:Document {document_id: $document_id})
-    SET d.filename = $filename,
+    // 1. Create or update the Document Node by unique filename
+    MERGE (d:Document {filename: $filename})
+    SET d.document_id = $document_id,
         d.doc_type = $document_type,
         d.timestamp = $processed_at
 
@@ -83,11 +97,12 @@ def ingest_document_to_neo4j(doc_data: dict):
     MERGE (c)-[:MENTIONS]->(e)
     """
     
-    if driver is None:
+    drv = get_driver()
+    if drv is None:
         print("Error: Neo4j driver is not initialized.")
         return 0
 
-    with driver.session() as session:
+    with drv.session() as session:
         result = session.run(query, 
                              document_id=doc_data.get('document_id', ''),
                              filename=doc_data['filename'],
@@ -113,11 +128,12 @@ def search_graph_by_embedding(embedding: list, top_k: int = 3):
     LIMIT $top_k
     """
     
-    if driver is None:
+    drv = get_driver()
+    if drv is None:
         print("Error: Neo4j driver is not initialized.")
         return []
 
     # Simulating a response for the hackathon setup
-    with driver.session() as session:
+    with drv.session() as session:
         result = session.run(query, top_k=top_k)
         return [record.data() for record in result]

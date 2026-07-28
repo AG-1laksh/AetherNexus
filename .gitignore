@@ -36,3 +36,15 @@ document_pipeline/vector_db/.chroma/
 
 # Logs
 document_pipeline/output/logs/
+
+# Virtual Environments
+venv/
+venv_312/
+venv_clean/
+*venv*/
+
+# Python Cache & Logs
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

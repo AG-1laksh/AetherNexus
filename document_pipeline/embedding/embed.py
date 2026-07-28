@@ -14,6 +14,7 @@ def get_embedding_model() -> SentenceTransformer:
     if _model is None:
         logger.info(f"Loading embedding model {EMBEDDING_MODEL_NAME}...")
         _model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        logger.info(f"Embedding model loaded on device: {_model.device}")
         
         # Verify dimension matches config
         model_dim = _model.get_embedding_dimension()

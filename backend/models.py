@@ -52,6 +52,7 @@ class SourceCitation(BaseModel):
     confidence_score: float
 
 class QueryResponse(BaseModel):
+    answer: Optional[str] = None
     context_chunks: List[SourceCitation]
     graph_entities: List[Dict[str, Any]] = Field(description="Related entities pulled from the Knowledge Graph")
     message: str = "Query processed successfully"

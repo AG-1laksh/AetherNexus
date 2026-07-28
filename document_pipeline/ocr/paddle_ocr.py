@@ -23,9 +23,13 @@ logger = logging.getLogger(__name__)
 class PaddleOCREngine:
     def __init__(self):
         self.ocr = None
-        if PADDLE_AVAILABLE:
+        self._init_attempted = False
+
+    def _ensure_ocr_initialized(self):
+        if self.ocr is None and not self._init_attempted and PADDLE_AVAILABLE:
+            self._init_attempted = True
             try:
-                # Initialize PaddleOCR
+                logger.info("Lazy-loading PaddleOCR engine...")
                 self.ocr = PaddleOCR(use_angle_cls=True, lang='en')
             except Exception as e:
                 logger.error(f"Failed to initialize PaddleOCR: {e}")
@@ -69,8 +73,9 @@ class PaddleOCREngine:
 
     def _run_paddleocr(self, image: np.ndarray) -> Optional[Dict[str, Any]]:
         """Run paddle OCR on an image numpy array."""
+        self._ensure_ocr_initialized()
         if self.ocr is None:
-            raise RuntimeError("PaddleOCR engine is not initialized.")
+            raise RuntimeError("PaddleOCR engine is not initialized or not available.")
             
         result = self.ocr.ocr(image)
         if not result:

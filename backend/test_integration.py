@@ -8,7 +8,7 @@ client = TestClient(app)
 print("--- Testing TM1 Ingestion (POST /api/ingest/document) ---")
 dummy_data = {
     "document_id": "test-doc-002",
-    "filename": "valve_inspection.pdf",
+    "filename": "sample_test_doc.pdf",
     "document_type": "inspection",
     "processed_at": "2026-07-20T12:00:00Z",
     "page_count": 1,

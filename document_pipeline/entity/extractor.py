@@ -31,6 +31,11 @@ def load_spacy():
         return _nlp
         
     try:
+        spacy.prefer_gpu()
+    except Exception as e:
+        logger.warning(f"Could not enable GPU for spaCy: {e}")
+        
+    try:
         _nlp = spacy.load("en_core_web_sm")
     except OSError:
         logger.warning("spaCy model 'en_core_web_sm' not found. Downloading now...")
@@ -97,6 +102,15 @@ def extract_entities(text: str) -> ExtractedEntities:
     nlp = load_spacy()
     doc = nlp(text)
     
+    return _extract_from_spacy_doc(entities, doc)
+            
+    if locs:
+        entities.location = locs[0]
+        
+    return entities
+
+def _extract_from_spacy_doc(entities: ExtractedEntities, doc) -> ExtractedEntities:
+    """Helper to extract NER logic from a pre-parsed spacy Doc"""
     persons = []
     orgs = []
     locs = []
@@ -110,17 +124,14 @@ def extract_entities(text: str) -> ExtractedEntities:
             locs.append(ent.text)
             
     # Map to schema fields (heuristic assignments)
-    # Filter out obvious false positives (spaCy sometimes misidentifies equipment or headers)
     valid_persons = [p for p in persons if not re.search(r'(?i)(?:valve|pump|motor|compressor|action|maintenance|cause|fault|issue|s/n)', p)]
     if valid_persons:
-        # Assign first person to engineer, second to technician if multiple
         entities.engineer = valid_persons[0]
         if len(valid_persons) > 1:
             entities.technician = valid_persons[1]
             
     valid_orgs = [o for o in orgs if not re.search(r'(?i)(?:s/n|serial|valve|pump|motor|inspection|date)', o)]
     for org in valid_orgs:
-        # Try to infer manufacturer vs department based on keywords
         if re.search(r'(?i)dept|department|division', org):
             if entities.department is None:
                 entities.department = org
@@ -132,6 +143,72 @@ def extract_entities(text: str) -> ExtractedEntities:
         entities.location = locs[0]
         
     return entities
+
+def extract_entities_batch(texts: List[str]) -> List[ExtractedEntities]:
+    """
+    Extract structured entities from a batch of texts using Regex and spaCy (optimized with nlp.pipe).
+    """
+    if not texts:
+        return []
+        
+    results = []
+    # 1. First run Regex (very fast, no batching needed)
+    for text in texts:
+        entities = ExtractedEntities()
+        if not text:
+            results.append(entities)
+            continue
+            
+        eq_pattern = r'(?i)\b(?:pump|valve|motor|compressor|tank|generator|turbine)\s+[A-Z0-9-]+\b'
+        equipment_matches = re.findall(eq_pattern, text)
+        if equipment_matches:
+            entities.equipment = list(set([e.title() for e in equipment_matches]))
+            
+        temp_pattern = r'\b\d+(?:\.\d+)?\s*(?:°C|°F|C|F)\b'
+        temp_match = re.search(temp_pattern, text)
+        if temp_match:
+            entities.temperature = temp_match.group(0)
+            
+        pres_pattern = r'\b\d+(?:\.\d+)?\s*(?:bar|psi|kPa|MPa)\b'
+        pres_match = re.search(pres_pattern, text, re.IGNORECASE)
+        if pres_match:
+            entities.pressure = pres_match.group(0).lower()
+            
+        sn_pattern = r'(?i)\b(?:s/n|serial no\.?|serial number)\s*[:-]?\s*([A-Z0-9-]+)\b'
+        sn_match = re.search(sn_pattern, text)
+        if sn_match:
+            entities.serial_number = sn_match.group(1).upper()
+            
+        date_pattern = r'\b(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})\b'
+        date_match = re.search(date_pattern, text)
+        if date_match:
+            entities.date = date_match.group(0)
+    
+        fault_pattern = r'(?i)\b(?:cause|fault|failure|issue|problem)[s]?\s*[:-]\s*([^.\n]+)'
+        fault_match = re.search(fault_pattern, text)
+        if fault_match:
+            entities.fault = fault_match.group(1).strip()
+            
+        action_pattern = r'(?i)\b(?:action|repair|maintenance|resolution)\s*[:-]\s*([^.\n]+)'
+        action_match = re.search(action_pattern, text)
+        if action_match:
+            entities.maintenance_action = action_match.group(1).strip()
+            
+        results.append(entities)
+        
+    # 2. Run Spacy NER in batch using nlp.pipe
+    nlp = load_spacy()
+    # nlp.pipe yields generator of Docs
+    valid_indices = [i for i, text in enumerate(texts) if text]
+    valid_texts = [texts[i] for i in valid_indices]
+    
+    docs = list(nlp.pipe(valid_texts))
+    
+    for idx, doc in zip(valid_indices, docs):
+        # Update the entities in results with NER data
+        results[idx] = _extract_from_spacy_doc(results[idx], doc)
+        
+    return results
 
 def merge_entities(entities_list: List[ExtractedEntities]) -> ExtractedEntities:
     """
